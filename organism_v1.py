@@ -56,12 +56,17 @@ settings['x_max'] =  2.0        # arena western border
 settings['y_min'] = -2.0        # arena southern border
 settings['y_max'] =  2.0        # arena northern border
 
-settings['plot'] = False        # plot final generation?
+settings['plot_final'] = False	# plot final generation?
+settings['plot_all'] = True		# plot all
+settings['plot_drawn'] = False	# This tells us to update the plot instead of displaying it
 
 # ORGANISM NEURAL NET SETTINGS
 settings['inodes'] = 1          # number of input nodes
 settings['hnodes'] = 5          # number of hidden nodes
 settings['onodes'] = 2          # number of output nodes
+
+# PUT PYPLOT INTO INTERACTIVE MODE
+plt.ion()
 
 #--- FUNCTIONS ----------------------------------------------------------------+
 
@@ -101,8 +106,10 @@ def plot_frame(settings, organisms, foods, gen, time):
     plt.figtext(0.025, 0.95,r'GENERATION: '+str(gen))
     plt.figtext(0.025, 0.90,r'T_STEP: '+str(time))
 
-    plt.savefig(str(gen)+'-'+str(time)+'.png', dpi=100)
-##    plt.show()
+##    plt.savefig(str(gen)+'-'+str(time)+'.png', dpi=100)
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+    plt.pause(0.05)
 
 
 def evolve(settings, organisms_old, gen):
@@ -181,7 +188,7 @@ def simulate(settings, organisms, foods, gen):
     for t_step in range(0, total_time_steps, 1):
 
         # PLOT SIMULATION FRAME
-        if settings['plot']==True and gen==settings['gens']-1:
+        if (settings['plot_final'] is True and gen==settings['gens']-1) or settings['plot_all'] is True:
             plot_frame(settings, organisms, foods, gen, t_step)
         
         # UPDATE FITNESS FUNCTION
@@ -224,7 +231,39 @@ def simulate(settings, organisms, foods, gen):
 
 
 #--- CLASSES ------------------------------------------------------------------+
+class dynamicPlot():
+    def __init__(self, settings):
+        self.fig, self.ax = plt.subplots()
+        self.fig.set_size_inches(9.6, 5.4)
+        
+        # Set up limits
+        self.ax.set_xlim([settings['x_min'] + settings['x_min'] * 0.25,
+                         settings['x_max'] + settings['x_max'] * 0.25])
+        self.ax.set_ylim([settings['y_min'] + settings['y_min'] * 0.25,
+                         settings['y_max'] + settings['y_max'] * 0.25])
 
+    def update(self, settings, organisms, foods, gen, time):
+        # PLOT ORGANISMS
+        for organism in organisms:
+            plot_organism(organism.x, organism.y, organism.r, self.ax)
+
+        # PLOT FOOD PARTICLES
+        for food in foods:
+            plot_food(food.x, food.y, self.ax)
+
+        # MISC PLOT SETTINGS
+        self.ax.set_aspect('equal')
+        frame = plt.gca()
+        frame.axes.get_xaxis().set_ticks([])
+        frame.axes.get_yaxis().set_ticks([])
+
+        self.fig.text(0.025, 0.95,r'GENERATION: '+str(gen))
+        self.fig.text(0.025, 0.90,r'T_STEP: '+str(time))
+
+    ##    plt.savefig(str(gen)+'-'+str(time)+'.png', dpi=100)
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        plt.pause(0.05)
 
 class food():
     def __init__(self, settings):
@@ -319,7 +358,9 @@ def run(settings):
 
         # EVOLVE
         organisms, stats = evolve(settings, organisms, gen)
-        print '> GEN:',gen,'BEST:',stats['BEST'],'AVG:',stats['AVG'],'WORST:',stats['WORST']
+        print('> GEN: {} BEST: {} AVG: {} WORST: {}'.format(
+			gen, stats['BEST'], stats['AVG'], stats['WORST'])
+		)
 
     pass
 
