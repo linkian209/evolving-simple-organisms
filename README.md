@@ -6,6 +6,7 @@ Evolving simple organisms using a genetic algorithm and deep learning from scrat
 * Add multiprocessing
 * Add more stats to organisms
 * Allow organisms to kill and eat each other
+* Save each generation as a gif
 
 ![alt text](organism_v1.gif)
 
