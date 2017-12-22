@@ -21,9 +21,13 @@ from plotting import plot_organism
 import numpy as np
 import operator
 
+from multiprocessing import Pool
+from multiprocessing import Semaphore
+
 from math import atan2
 from math import cos
 from math import degrees
+from math import ceil
 from math import floor
 from math import radians
 from random import random
@@ -36,6 +40,8 @@ from random import uniform
 #--- CONSTANTS ----------------------------------------------------------------+
 
 settings = {}
+organisms = []
+foods = []
 
 # EVOLUTION SETTINGS 
 settings['pop_size'] = 50       # number of organisms
@@ -45,6 +51,7 @@ settings['elitism'] = 0.20      # elitism (selection bias)
 settings['mutate'] = 0.10       # mutation rate
 
 # SIMULATION SETTINGS
+settings['workers'] = 4         # number of pooled workers
 settings['gen_time'] = 100      # generation length         (seconds)
 settings['dt'] = 0.04           # simulation time step      (dt)
 settings['dr_max'] = 720        # max rotational speed      (degrees per second)
@@ -180,7 +187,7 @@ def evolve(settings, organisms_old, gen):
     return organisms_new, stats
 
 
-def simulate(settings, organisms, foods, gen):
+def simulate(settings, gen, plot, pool):
 
     total_time_steps = int(settings['gen_time'] / settings['dt'])
     
@@ -189,60 +196,123 @@ def simulate(settings, organisms, foods, gen):
 
         # PLOT SIMULATION FRAME
         if (settings['plot_final'] is True and gen==settings['gens']-1) or settings['plot_all'] is True:
-            plot_frame(settings, organisms, foods, gen, t_step)
+            plot.update(settings, organisms, foods, gen, t_step)
+            
+        # PREPARE FOR FITNESS
+        group_size = ceil(settings['pop_size']/settings['workers'])
+        groups = [(i, i+group_size if i+group_size < settings['pop_size']-1 else settings['pop_size']-1) 
+                  for i in range(0, settings['pop_size'], group_size)]
+          
         
-        # UPDATE FITNESS FUNCTION
-        for food in foods:
-            for org in organisms:
-                food_org_dist = dist(org.x, org.y, food.x, food.y)
+        pool.starmap(fitness, groups)
+        
+        # # UPDATE FITNESS FUNCTION
+        # for food in foods:
+            # for org in organisms:
+                # food_org_dist = dist(org.x, org.y, food.x, food.y)
 
-                # UPDATE FITNESS FUNCTION
-                if food_org_dist <= 0.075:
-                    org.fitness += food.energy
-                    food.respawn(settings)
+                # # UPDATE FITNESS FUNCTION
+                # if food_org_dist <= 0.075:
+                    # org.fitness += food.energy
+                    # food.respawn(settings)
 
-                # RESET DISTANCE AND HEADING TO NEAREST FOOD SOURCE
-                org.d_food = 100
-                org.r_food = 0
+                # # RESET DISTANCE AND HEADING TO NEAREST FOOD SOURCE
+                # org.d_food = 100
+                # org.r_food = 0
 
-        # CALCULATE HEADING TO NEAREST FOOD SOURCE
-        for food in foods:
-            for org in organisms:
+        # # CALCULATE HEADING TO NEAREST FOOD SOURCE
+        # for food in foods:
+            # for org in organisms:
                 
-                # CALCULATE DISTANCE TO SELECTED FOOD PARTICLE
-                food_org_dist = dist(org.x, org.y, food.x, food.y)
+                # # CALCULATE DISTANCE TO SELECTED FOOD PARTICLE
+                # food_org_dist = dist(org.x, org.y, food.x, food.y)
 
-                # DETERMINE IF THIS IS THE CLOSEST FOOD PARTICLE
-                if food_org_dist < org.d_food:
-                    org.d_food = food_org_dist
-                    org.r_food = calc_heading(org, food)
+                # # DETERMINE IF THIS IS THE CLOSEST FOOD PARTICLE
+                # if food_org_dist < org.d_food:
+                    # org.d_food = food_org_dist
+                    # org.r_food = calc_heading(org, food)
 
-        # GET ORGANISM RESPONSE
-        for org in organisms:
-            org.think()
+        # # GET ORGANISM RESPONSE
+        # for org in organisms:
+            # org.think()
 
-        # UPDATE ORGANISMS POSITION AND VELOCITY
-        for org in organisms:
-            org.update_r(settings)
-            org.update_vel(settings)
-            org.update_pos(settings)
+        # # UPDATE ORGANISMS POSITION AND VELOCITY
+        # for org in organisms:
+            # org.update_r(settings)
+            # org.update_vel(settings)
+            # org.update_pos(settings)
 
     return organisms
 
+def fitness(start, end):
+    # GLOBALS
+    
+    print(organisms)
+    print(start)
+    print(len(organisms)-1)
+    print(organisms[start])
+
+    # UPDATE FITNESS FUNCTION
+    for food in foods:
+        for org in organisms[start:end]:
+            food_org_dist = dist(org.x, org.y, food.x, food.y)
+
+            # UPDATE FITNESS FUNCTION
+            if food_org_dist <= 0.075:
+                food.acquire(block=True)
+                org.fitness += food.energy
+                food.respawn(settings)
+
+            # RESET DISTANCE AND HEADING TO NEAREST FOOD SOURCE
+            org.d_food = 100
+            org.r_food = 0
+
+    # CALCULATE HEADING TO NEAREST FOOD SOURCE
+    for food in foods:
+        for org in organisms[start:end]:
+            
+            # CALCULATE DISTANCE TO SELECTED FOOD PARTICLE
+            food_org_dist = dist(org.x, org.y, food.x, food.y)
+
+            # DETERMINE IF THIS IS THE CLOSEST FOOD PARTICLE
+            if food_org_dist < org.d_food:
+                org.d_food = food_org_dist
+                org.r_food = calc_heading(org, food)
+
+    # GET ORGANISM RESPONSE
+    for org in organisms[start:end]:
+        org.think()
+
+    # UPDATE ORGANISMS POSITION AND VELOCITY
+    for org in organisms[start:end]:
+        org.update_r(settings)
+        org.update_vel(settings)
+        org.update_pos(settings)
+    
+    pass
 
 #--- CLASSES ------------------------------------------------------------------+
 class dynamicPlot():
     def __init__(self, settings):
+        # Initialize plot vars
         self.fig, self.ax = plt.subplots()
         self.fig.set_size_inches(9.6, 5.4)
+        self.texts = [None, None]
         
         # Set up limits
+        self.setAxisLimits(settings)
+                         
+    def setAxisLimits(self,settings):
         self.ax.set_xlim([settings['x_min'] + settings['x_min'] * 0.25,
                          settings['x_max'] + settings['x_max'] * 0.25])
         self.ax.set_ylim([settings['y_min'] + settings['y_min'] * 0.25,
                          settings['y_max'] + settings['y_max'] * 0.25])
-
+    
     def update(self, settings, organisms, foods, gen, time):
+        # CLEAR FIGURE
+        self.ax.clear()
+        self.setAxisLimits(settings)
+        
         # PLOT ORGANISMS
         for organism in organisms:
             plot_organism(organism.x, organism.y, organism.r, self.ax)
@@ -257,19 +327,26 @@ class dynamicPlot():
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_ticks([])
 
-        self.fig.text(0.025, 0.95,r'GENERATION: '+str(gen))
-        self.fig.text(0.025, 0.90,r'T_STEP: '+str(time))
+        # ADD TEXT
+        if self.texts[0] is None:
+            self.texts[0] = self.fig.text(0.025, 0.95,r'GENERATION: '+str(gen))
+        else:
+            self.texts[0].set_text(r'GENERATION: '+str(gen))
+            
+        if self.texts[1] is None:
+            self.texts[1] = self.fig.text(0.025, 0.90,r'T_STEP: '+str(time))
+        else:
+            self.texts[1].set_text(r'T_STEP: '+str(time))
 
-    ##    plt.savefig(str(gen)+'-'+str(time)+'.png', dpi=100)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-        plt.pause(0.05)
 
 class food():
     def __init__(self, settings):
         self.x = uniform(settings['x_min'], settings['x_max'])
         self.y = uniform(settings['y_min'], settings['y_max'])
         self.energy = 1
+        self.lock = Semaphore()
 
 
     def respawn(self,settings):
@@ -338,23 +415,28 @@ class organism():
 def run(settings):
 
     #--- POPULATE THE ENVIRONMENT WITH FOOD ---------------+
-    foods = []
+    global foods
     for i in range(0,settings['food_num']):
         foods.append(food(settings))
 
     #--- POPULATE THE ENVIRONMENT WITH ORGANISMS ----------+
-    organisms = []
+    global organisms
     for i in range(0,settings['pop_size']):
         wih_init = np.random.uniform(-1, 1, (settings['hnodes'], settings['inodes']))     # mlp weights (input -> hidden)
         who_init = np.random.uniform(-1, 1, (settings['onodes'], settings['hnodes']))     # mlp weights (hidden -> output)
         
         organisms.append(organism(settings, wih_init, who_init, name='gen[x]-org['+str(i)+']'))
+        
+    #--- MAKE WORKER POOL ---------------------------------+
+    pool = Pool(settings['workers'])
     
     #--- CYCLE THROUGH EACH GENERATION --------------------+
     for gen in range(0, settings['gens']):
+        # CREATE PLOT
+        dyn_plot = dynamicPlot(settings)
         
         # SIMULATE
-        organisms = simulate(settings, organisms, foods, gen)
+        organisms = simulate(settings, gen, dyn_plot, pool)
 
         # EVOLVE
         organisms, stats = evolve(settings, organisms, gen)
@@ -367,6 +449,7 @@ def run(settings):
 
 #--- RUN ----------------------------------------------------------------------+
 
-run(settings)
+if __name__ == '__main__':
+    run(settings)
     
 #--- END ----------------------------------------------------------------------+
