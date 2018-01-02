@@ -4,6 +4,7 @@ Evolving simple organisms using a genetic algorithm and deep learning from scrat
 ## Plans for fork
 * Make plot update &#10004;
 * Add multiprocessing &#10004;
+* Update to use Tensor Flow (Since it can use GPUs and CPUs)
 * Add more stats to organisms
 * Allow organisms to kill and eat each other
 * Save each generation as a gif
