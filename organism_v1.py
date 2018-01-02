@@ -21,8 +21,7 @@ from plotting import plot_organism
 import numpy as np
 import operator
 
-from multiprocessing import Pool
-from multiprocessing import Semaphore
+from multiprocessing import Pool, Manager
 
 from math import atan2
 from math import cos
@@ -40,8 +39,6 @@ from random import uniform
 #--- CONSTANTS ----------------------------------------------------------------+
 
 settings = {}
-organisms = []
-foods = []
 
 # EVOLUTION SETTINGS 
 settings['pop_size'] = 50       # number of organisms
@@ -51,7 +48,7 @@ settings['elitism'] = 0.20      # elitism (selection bias)
 settings['mutate'] = 0.10       # mutation rate
 
 # SIMULATION SETTINGS
-settings['workers'] = 4         # number of pooled workers
+settings['workers'] = 10         # number of pooled workers
 settings['gen_time'] = 100      # generation length         (seconds)
 settings['dt'] = 0.04           # simulation time step      (dt)
 settings['dr_max'] = 720        # max rotational speed      (degrees per second)
@@ -64,7 +61,7 @@ settings['y_min'] = -2.0        # arena southern border
 settings['y_max'] =  2.0        # arena northern border
 
 settings['plot_final'] = False	# plot final generation?
-settings['plot_all'] = True		# plot all
+settings['plot_all'] = True 	# plot all
 settings['plot_drawn'] = False	# This tells us to update the plot instead of displaying it
 
 # ORGANISM NEURAL NET SETTINGS
@@ -187,7 +184,7 @@ def evolve(settings, organisms_old, gen):
     return organisms_new, stats
 
 
-def simulate(settings, gen, plot, pool):
+def simulate(settings, gen, plot, pool, foods, organisms):
 
     total_time_steps = int(settings['gen_time'] / settings['dt'])
     
@@ -200,9 +197,13 @@ def simulate(settings, gen, plot, pool):
             
         # PREPARE FOR FITNESS
         group_size = ceil(settings['pop_size']/settings['workers'])
-        groups = [(i, i+group_size if i+group_size < settings['pop_size']-1 else settings['pop_size']-1) 
-                  for i in range(0, settings['pop_size'], group_size)]
-          
+        groups = []
+        for i in range(0, settings['pop_size'], group_size):
+            if i + group_size < settings['pop_size'] - 1:
+                end = i + group_size
+            else:
+                end = settings['pop_size'] - 1
+            groups.append((i, end, organisms, foods, settings))
         
         pool.starmap(fitness, groups)
         
@@ -244,32 +245,30 @@ def simulate(settings, gen, plot, pool):
 
     return organisms
 
-def fitness(start, end):
-    # GLOBALS
-    
-    print(organisms)
-    print(start)
-    print(len(organisms)-1)
-    print(organisms[start])
-
+def fitness(start, end, organisms, foods, settings):
     # UPDATE FITNESS FUNCTION
-    for food in foods:
-        for org in organisms[start:end]:
+    for i in range(len(foods)):
+        food = foods[i]
+        for j in range(start, end):
+            org = organisms[j]
             food_org_dist = dist(org.x, org.y, food.x, food.y)
 
             # UPDATE FITNESS FUNCTION
             if food_org_dist <= 0.075:
-                food.acquire(block=True)
                 org.fitness += food.energy
                 food.respawn(settings)
 
             # RESET DISTANCE AND HEADING TO NEAREST FOOD SOURCE
             org.d_food = 100
             org.r_food = 0
-
+            
+            organisms[j] = org
+            
+        foods[i] = food
     # CALCULATE HEADING TO NEAREST FOOD SOURCE
     for food in foods:
-        for org in organisms[start:end]:
+        for j in range(start, end):
+            org = organisms[j]
             
             # CALCULATE DISTANCE TO SELECTED FOOD PARTICLE
             food_org_dist = dist(org.x, org.y, food.x, food.y)
@@ -278,16 +277,26 @@ def fitness(start, end):
             if food_org_dist < org.d_food:
                 org.d_food = food_org_dist
                 org.r_food = calc_heading(org, food)
+                
+            organisms[j] = org
 
     # GET ORGANISM RESPONSE
-    for org in organisms[start:end]:
+    for i in range(start, end):
+        org = organisms[i]
         org.think()
-
-    # UPDATE ORGANISMS POSITION AND VELOCITY
-    for org in organisms[start:end]:
+        # UPDATE ORGANISMS POSITION AND VELOCITY
         org.update_r(settings)
         org.update_vel(settings)
         org.update_pos(settings)
+        organisms[i] = org
+        
+    # UPDATE ORGANISMS POSITION AND VELOCITY
+    #for org in range(start, end):
+    #    org = organisms[i]
+    #    org.update_r(settings)
+    #    org.update_vel(settings)
+    #    org.update_pos(settings)
+    #    organisms[i] = org
     
     pass
 
@@ -346,7 +355,6 @@ class food():
         self.x = uniform(settings['x_min'], settings['x_max'])
         self.y = uniform(settings['y_min'], settings['y_max'])
         self.energy = 1
-        self.lock = Semaphore()
 
 
     def respawn(self,settings):
@@ -371,6 +379,9 @@ class organism():
 
         self.wih = wih
         self.who = who
+        
+        self.nn_dv = 0
+        self.nn_dr = 0
 
         self.name = name
         
@@ -414,21 +425,22 @@ class organism():
 
 def run(settings):
 
+    #--- MAKE WORKER POOL AND NAMESPACE -------------------+
+    pool = Pool(settings['workers'])
+    manager = Manager()
+
     #--- POPULATE THE ENVIRONMENT WITH FOOD ---------------+
-    global foods
+    foods = manager.list()
     for i in range(0,settings['food_num']):
         foods.append(food(settings))
 
     #--- POPULATE THE ENVIRONMENT WITH ORGANISMS ----------+
-    global organisms
+    organisms = manager.list()
     for i in range(0,settings['pop_size']):
         wih_init = np.random.uniform(-1, 1, (settings['hnodes'], settings['inodes']))     # mlp weights (input -> hidden)
         who_init = np.random.uniform(-1, 1, (settings['onodes'], settings['hnodes']))     # mlp weights (hidden -> output)
         
         organisms.append(organism(settings, wih_init, who_init, name='gen[x]-org['+str(i)+']'))
-        
-    #--- MAKE WORKER POOL ---------------------------------+
-    pool = Pool(settings['workers'])
     
     #--- CYCLE THROUGH EACH GENERATION --------------------+
     for gen in range(0, settings['gens']):
@@ -436,7 +448,7 @@ def run(settings):
         dyn_plot = dynamicPlot(settings)
         
         # SIMULATE
-        organisms = simulate(settings, gen, dyn_plot, pool)
+        organisms = simulate(settings, gen, dyn_plot, pool, foods, organisms)
 
         # EVOLVE
         organisms, stats = evolve(settings, organisms, gen)

@@ -3,7 +3,7 @@ Evolving simple organisms using a genetic algorithm and deep learning from scrat
 
 ## Plans for fork
 * Make plot update &#1004;
-* Add multiprocessing
+* Add multiprocessing &#1004;
 * Add more stats to organisms
 * Allow organisms to kill and eat each other
 * Save each generation as a gif
